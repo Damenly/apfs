@@ -1,0 +1,40 @@
+APFS 
+============
+Apple File System(APFS) is a successor filesystem of hfsplus
+and was introduced by Apple Inc. It is widely used in many apple devices.
+
+This implementation only supports mount inreadonly mode for now.
+                                      
+WARN: The implementation of APFS is written by my interests.
+It's dangerous, unstable and bugous.
+It's been tested roughly in limited environments.
+It may crash your kernel even in readonly mode.
+So use it at your risks.
+
+Requirements:
+1) Kernel version >=v5.15
+2) LZFSE out of tree module https://github.com/Damenly/lzfse
+
+Supported mount options:
+1) subvolid=
+  mount -t apfs  -o subvolid=4 /dev/vdc3 /mnt
+  
+Features implemented:
+1) mount in readonly mode
+2) buffer read uncompressed files
+3) compressed files read(LZVN, LZFSE and ZLIB)
+
+Features unimplemented:
+
+1) Snapshot mount
+2) Sealed Volumes
+3) Volume group support
+4) Encrytions
+
+Acknowledgments:
+1) https://github.com/torvalds/linux/tree/master/fs/btrfs
+Most codes are copied from linux/fs/btrfs, and reuses its
+skeleton e.g. extent_buffer, btree operations and buffer read paths.
+2) https://developer.apple.com/support/downloads/Apple-File-System-Reference.pdf
+3) https://github.com/linux-apfs/linux-apfs-rw
+4) https://github.com/sgan81/apfs-fuse
