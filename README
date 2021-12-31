@@ -15,6 +15,13 @@ Requirements:
 1) Kernel version >=v5.15
 2) LZFSE out of tree module https://github.com/Damenly/lzfse
 
+INSTALL:
+1) git clone https://github.com/Damenly/apfs /usr/src/apfs-0.1
+2) dkms add -m apfs -v 0.1
+3) dkms build -m apfs -v 0.1
+4) dkms install -m apfs -v 0.1
+5) modprobe apfs
+
 Supported mount options:
 1) subvolid=
   mount -t apfs  -o subvolid=4 /dev/vdc3 /mnt
@@ -33,8 +40,8 @@ Features unimplemented:
 
 Acknowledgments:
 1) https://github.com/torvalds/linux/tree/master/fs/btrfs
-Most codes are copied from linux/fs/btrfs, and reuses its
-skeleton e.g. extent_buffer, btree operations and buffer read paths.
+    Most codes are copied from linux/fs/btrfs, and reuses its
+    skeleton e.g. extent_buffer, btree operations and buffer read paths.
 2) https://developer.apple.com/support/downloads/Apple-File-System-Reference.pdf
 3) https://github.com/linux-apfs/linux-apfs-rw
 4) https://github.com/sgan81/apfs-fuse
