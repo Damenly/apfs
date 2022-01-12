@@ -1101,9 +1101,7 @@ void apfs_release_nx_super(struct apfs_nx_superblock *super)
 
 void apfs_release_volume_super(struct apfs_vol_superblock *super)
 {
-	struct page *page = virt_to_page(super);
-
-	put_page(page);
+	kfree(super);
 }
 
 void apfs_release_disk_super(struct apfs_super_block *super)

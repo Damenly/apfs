@@ -37,7 +37,7 @@ apfs-y += apfs_trace.o \
 	   reada.o backref.o ulist.o qgroup.o send.o dev-replace.o raid56.o \
 	   uuid-tree.o props.o free-space-tree.o tree-checker.o space-info.o \
 	   block-rsv.o delalloc-space.o block-group.o discard.o reflink.o \
-	   subpage.o tree-mod-log.o unicode.o
+	   subpage.o tree-mod-log.o unicode.o apfs_buf.o
 
 apfs-$(CONFIG_APFS_FS_POSIX_ACL) += acl.o
 apfs-$(CONFIG_APFS_FS_CHECK_INTEGRITY) += check-integrity.o

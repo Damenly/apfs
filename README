@@ -25,18 +25,19 @@ INSTALL:
 Supported mount options:
 1) subvolid=
   mount -t apfs  -o subvolid=4 /dev/vdc3 /mnt
+2) xid=
+  mount -t apfs  -o subvolid=4,xid=132 /dev/vdc3 /mnt
   
 Features implemented:
 1) mount in readonly mode
 2) buffer read uncompressed files
 3) compressed files read(LZVN, LZFSE and ZLIB)
+4) Snapshot mount
 
 Features unimplemented:
-
-1) Snapshot mount
-2) Sealed Volumes
-3) Volume group support
-4) Encrytions
+1) Sealed Volumes
+2) Volume group support
+3) Encrytions
 
 Acknowledgments:
 1) https://github.com/torvalds/linux/tree/master/fs/btrfs

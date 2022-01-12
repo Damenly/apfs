@@ -1262,7 +1262,7 @@ struct apfs_vol_superblock {
 	 * APFS_OBJ_PHYSICAL | APFS_OBJ_TYPE_BLOCKREF,
 	 * subtype of OBJECT_BLOCK_REF.
 	 */
-	__le32 extentref_tree_type;
+	__le32 extref_tree_type;
 	/*
 	 * APFS_OBJ_PHYSICAL | APFS_OBJ_TYPE_BLOCKREF,
 	 * subtype OBJECT_BLOCK_REF.
@@ -1357,14 +1357,14 @@ APFS_SETGET_STACK_FUNCS(volume_super_unmount_time, struct apfs_vol_superblock,
 			unmount_time, 64);
 APFS_SETGET_STACK_FUNCS(volume_super_omap_oid, struct apfs_vol_superblock,
 			omap_oid, 64);
-APFS_SETGET_STACK_FUNCS(volume_super_snap_tree, struct apfs_vol_superblock,
-			snap_meta_ext_oid, 64);
 APFS_SETGET_STACK_FUNCS(volume_super_fext_tree, struct apfs_vol_superblock,
 			fext_tree_oid, 64);
 APFS_SETGET_STACK_FUNCS(volume_super_extref_tree, struct apfs_vol_superblock,
 			extref_tree_oid, 64);
 APFS_SETGET_STACK_FUNCS(volume_super_root_tree, struct apfs_vol_superblock,
 			root_tree_oid, 64);
+APFS_SETGET_STACK_FUNCS(volume_super_snap_tree, struct apfs_vol_superblock,
+			snap_meta_tree_oid, 64);
 APFS_SETGET_STACK_FUNCS(volume_super_num_snaps, struct apfs_vol_superblock,
 			num_snapshots, 64);
 APFS_SETGET_STACK_FUNCS(volume_super_num_files, struct apfs_vol_superblock,
@@ -1963,19 +1963,30 @@ enum apfs_snap_meta_flags {
 	SNAP_META_MERGE_IN_PROGRESS = 0x00000002,
 };
 
-struct apfs_snap_meta_val {
-	/* physical address of extent ref tree */
-	__le64 extentref_tree_oid;
-	/* physical address of volume superblock */
-	__le64 sblock_oid;
-	__le64 create_time;
-	__le64 change_time;
+struct apfs_snap_meta {
+	/* physical object identifier of the B-tree stores extents info. */
+	__le64 extref_tree_oid;
+	/* The physical object identifier of the volume superblock. */
+	__le64 super_bno;
+	/* The time that this snapshot was created. */
+	__le64 btime;
+	__le64 mtime;
 	__le64 inum;
-	__le32 extentref_tree_type;
+	__le32 extref_tree_type;
 	__le32 flags;
-	__le16 name_len;
+	__le16 namelen;
 	u8 name[0];
 } __attribute__((__packed__));
+
+APFS_SETGET_FUNCS(snap_extref_tree_oid, struct apfs_snap_meta, extref_tree_oid, 64);
+APFS_SETGET_FUNCS(snap_super_bno, struct apfs_snap_meta, super_bno, 64);
+APFS_SETGET_FUNCS(snap_btime, struct apfs_snap_meta, btime, 64);
+APFS_SETGET_FUNCS(snap_mtime, struct apfs_snap_meta, mtime, 64);
+APFS_SETGET_FUNCS(snap_inum, struct apfs_snap_meta, inum, 64);
+APFS_SETGET_FUNCS(snap_extref_tree_type, struct apfs_snap_meta, extref_tree_type, 32);
+APFS_SETGET_FUNCS(snap_flags, struct apfs_snap_meta, flags, 32);
+APFS_SETGET_FUNCS(snap_namelen, struct apfs_snap_meta, namelen, 16);
+
 
 struct apfs_snap_name_key {
 	/* id should always be 0 */
@@ -1986,10 +1997,12 @@ struct apfs_snap_name_key {
 
 struct apfs_snap_name_val {
 	/* last trans id */
-	__le64 snap_xid;
+	__le64 xid;
 } __attribute__((__packed__));
 
-struct apfs_snap_meta_ext {
+APFS_SETGET_STACK_FUNCS(snap_name_xid, struct apfs_snap_name_val, xid, 64);
+
+struct apfs_snap_ext {
 	__le32 version;
 	__le32 flags;
 	__le64 xid;
@@ -1997,9 +2010,14 @@ struct apfs_snap_meta_ext {
 	__le64 token;
 } __attribute__((__packed__));
 
-struct apfs_snap_meta_ext_obj_phys {
+APFS_SETGET_STACK_FUNCS(snap_ext_version, struct apfs_snap_ext, version, 32);
+APFS_SETGET_STACK_FUNCS(snap_ext_flags, struct apfs_snap_ext, flags, 32);
+APFS_SETGET_STACK_FUNCS(snap_ext_xid, struct apfs_snap_ext, xid, 64);
+APFS_SETGET_STACK_FUNCS(snap_ext_token, struct apfs_snap_ext, token, 64);
+
+struct apfs_snap_ext_phys {
 	struct apfs_obj_header o;
-	struct apfs_snap_meta_ext sme;
+	struct apfs_snap_ext se;
 };
 
 #define BTREE_UINT64_KEYS 0x00000001
@@ -2163,14 +2181,10 @@ struct apfs_root_info {
 	__le64 node_count;
 };
 
-APFS_SETGET_FUNCS(root_info_longest_key, struct apfs_root_info,
-			longest_key, 32);
-APFS_SETGET_FUNCS(root_info_longest_val, struct apfs_root_info,
-			longest_val, 32);
-APFS_SETGET_FUNCS(root_info_key_count, struct apfs_root_info,
-			key_count, 64);
-APFS_SETGET_FUNCS(root_info_node_count, struct apfs_root_info,
-			node_count, 64);
+APFS_SETGET_FUNCS(root_info_longest_key, struct apfs_root_info,	longest_key, 32);
+APFS_SETGET_FUNCS(root_info_longest_val, struct apfs_root_info,	longest_val, 32);
+APFS_SETGET_FUNCS(root_info_key_count, struct apfs_root_info, key_count, 64);
+APFS_SETGET_FUNCS(root_info_node_count, struct apfs_root_info, node_count, 64);
 
 #define APFS_ROOT_INFO_OFFSET (APFS_DEFAULT_NODE_SIZE -		\
 			       sizeof(struct apfs_root_info))
@@ -3522,6 +3536,7 @@ struct apfs_fs_info {
 	struct apfs_root *fext_root;
 
 	int index;
+	u64 xid; //xid when mounted
 
 	struct apfs_device *device;
 	u32 node_size;
@@ -4743,8 +4758,8 @@ static inline bool
 apfs_is_fs_node(const struct extent_buffer *eb)
 {
 	return apfs_header_subtype(eb) == APFS_OBJ_TYPE_FSTREE ||
-	    apfs_header_subtype(eb) == APFS_OBJ_TYPE_REFTREE ||
-	    apfs_header_subtype(eb) == APFS_OBJ_TYPE_SNAPTREE;
+		apfs_header_subtype(eb) == APFS_OBJ_TYPE_REFTREE ||
+		apfs_header_subtype(eb) == APFS_OBJ_TYPE_SNAPTREE;
 }
 
 /* struct apfs_disk_key */
@@ -4881,7 +4896,7 @@ apfs_obj_vallen(u64 type)
 {
 	switch (type) {
 	case APFS_TYPE_SNAP_METADATA:
-		return sizeof(struct apfs_snap_meta_val);
+		return sizeof(struct apfs_snap_meta);
 		break;
 	case APFS_TYPE_EXTENT:
 		return sizeof(struct apfs_phys_extent_item);

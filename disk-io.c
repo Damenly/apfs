@@ -44,6 +44,7 @@
 #include "zoned.h"
 #include "subpage.h"
 #include "apfs_trace.h"
+#include "apfs_buf.h"
 
 #define APFS_SUPER_FLAG_SUPP	(APFS_HEADER_FLAG_WRITTEN |\
 				 APFS_HEADER_FLAG_RELOC |\
@@ -1573,7 +1574,8 @@ void apfs_check_leaked_roots(struct apfs_fs_info *fs_info)
 #endif
 }
 
-static void __apfs_free_fs_info(struct apfs_fs_info *fs_info, bool dummy)
+static void
+__apfs_free_fs_info(struct apfs_fs_info *fs_info, bool dummy, bool free_self)
 {
 	if (fs_info == NULL)
 		return ;
@@ -1609,6 +1611,8 @@ static void __apfs_free_fs_info(struct apfs_fs_info *fs_info, bool dummy)
 
 	if (!dummy)
 		apfs_put_nx_info(fs_info->nx_info);
+	if (!free_self)
+		return;
 
 	kfree(fs_info->super_copy);
 	kfree(fs_info->__super_copy);
@@ -1618,12 +1622,17 @@ static void __apfs_free_fs_info(struct apfs_fs_info *fs_info, bool dummy)
 
 void apfs_free_fs_info(struct apfs_fs_info *fs_info)
 {
-	__apfs_free_fs_info(fs_info, false);
+	__apfs_free_fs_info(fs_info, false, true);
+}
+
+void apfs_destroy_fs_info(struct apfs_fs_info *fs_info)
+{
+	__apfs_free_fs_info(fs_info, false, false);
 }
 
 static void apfs_free_dummy_fs_info(struct apfs_fs_info *fs_info)
 {
-	__apfs_free_fs_info(fs_info, true);
+	__apfs_free_fs_info(fs_info, true, true);
 }
 
 void apfs_free_nx_info(struct apfs_nx_info *nx_info)
@@ -2496,6 +2505,19 @@ static int apfs_read_vol_roots(struct apfs_fs_info *fs_info)
 		fs_info->extref_root = root;
 	}
 
+	/* Oh, Apple. snap tree oid is physical block number too */
+	bytenr = apfs_volume_super_snap_tree(sb) << fs_info->block_size_bits;
+	if (bytenr) {
+		root = apfs_read_root(fs_info, APFS_OBJ_TYPE_SNAPTREE, bytenr);
+		if (IS_ERR(root)) {
+			apfs_err(fs_info, "failed to read snap tree root");
+			ret = PTR_ERR(root);
+			goto out;
+		}
+
+		fs_info->snap_root = root;
+	}
+
 	return 0;
 out:
 	free_root_pointers(fs_info, true);
@@ -3321,9 +3343,14 @@ static int apfs_validate_nx_super(const struct apfs_nx_superblock *sb)
 	return ret;
 }
 
-static int apfs_validate_volume_super(const struct apfs_vol_superblock *sb)
+static int apfs_validate_volume_super(const struct apfs_vol_superblock *sb,
+				      size_t size)
 {
 	int ret;
+
+	/* don't about csum of a snapshot volume super */
+	if (size != APFS_SUPER_INFO_SIZE)
+		return 0;
 
 	ret = apfs_verify_obj_csum(&sb->o, APFS_SUPER_INFO_SIZE);
 	if (ret) {
@@ -3331,6 +3358,49 @@ static int apfs_validate_volume_super(const struct apfs_vol_superblock *sb)
 	}
 
 	return ret;
+}
+
+static struct apfs_vol_superblock * __cold
+read_snapshot_super(struct apfs_fs_info *fs_info, u64 xid)
+{
+	struct apfs_key key;
+	struct apfs_path *path;
+	struct apfs_snap_meta *sm;
+	struct apfs_vol_superblock *super;
+	int ret;
+	u64 bytenr;
+
+	if (!fs_info->snap_root)
+		return ERR_PTR(-ENOENT);
+
+	path = apfs_alloc_path();
+	if (!path)
+		return ERR_PTR(-ENOMEM);
+
+	key.objectid = xid;
+	key.type = APFS_TYPE_SNAP_METADATA;
+	key.offset = 0;
+	ret = apfs_search_slot(NULL, fs_info->snap_root, &key, path, 0, 0);
+	if (ret > 0)
+		ret = -ENOENT;
+	if (ret)
+		goto out;
+
+	sm = apfs_item_ptr(path->nodes[0], path->slots[0], struct apfs_snap_meta);
+	bytenr = apfs_snap_super_bno(path->nodes[0], sm) << fs_info->block_size_bits;
+
+	super = apfs_read_dev_volume_super(fs_info, bytenr, sizeof(*super));
+	if (IS_ERR(super)) {
+		ret = PTR_ERR(super);
+		goto out;
+	}
+	super->extref_tree_oid = cpu_to_le64(apfs_snap_extref_tree_oid(path->nodes[0], sm));
+	super->extref_tree_type = cpu_to_le32(apfs_snap_extref_tree_type(path->nodes[0], sm));
+	apfs_free_path(path);
+	return super;
+out:
+	apfs_free_path(path);
+	return ERR_PTR(ret);
 }
 
 static void __cold close_dummy_fs_info(struct apfs_nx_info *nx_info);
@@ -3342,7 +3412,9 @@ int __cold open_ctree(struct super_block *sb, struct apfs_device *device,
 	struct apfs_fs_info *fs_info = apfs_sb(sb);
 	struct apfs_nx_info *nx_info = device->nx_info;
 	struct apfs_root *omap_root;
+	u64 snap_xid = 0;
 	int ret;
+	u64 bytenr;
 
 	fs_info->nx_info = NULL;
 	if (device->nx_info)
@@ -3400,7 +3472,11 @@ open_fs_info:
 		goto fail_setup_nx_info;
 	}
 
-	ret = apfs_validate_volume_super(disk_super);
+	ret = apfs_validate_volume_super(disk_super, APFS_SUPER_INFO_SIZE);
+	if (ret) {
+		apfs_release_volume_super(disk_super);
+		goto fail_setup_nx_info;
+	}
 
 	fs_info = APFS_SB(sb);
 	fs_info->__super_copy = kzalloc(sizeof(struct apfs_vol_superblock),
@@ -3451,6 +3527,46 @@ open_fs_info:
 		goto fail_setup_omap_root;
 
 	set_bit(APFS_FS_OPEN, &fs_info->flags);
+	/* snapshot mounted */
+	if (snap_xid)
+		return 0;
+
+	/* let's mount the snapshot */
+	if (!fs_info->xid)
+		return 0;
+
+	snap_xid = fs_info->xid;
+	disk_super = read_snapshot_super(fs_info, snap_xid);
+	if (!disk_super)
+		disk_super = ERR_PTR(-ENOENT);
+	if (IS_ERR(disk_super)) {
+		ret = PTR_ERR(disk_super);
+		goto fail_setup_omap_root;
+	}
+
+	ret = apfs_validate_volume_super(disk_super, sizeof(*disk_super));
+	if (ret) {
+		apfs_release_volume_super(disk_super);
+		goto fail_setup_omap_root;
+	}
+
+	memcpy(fs_info->__super_copy, disk_super, sizeof(struct apfs_vol_superblock));
+	apfs_release_volume_super(disk_super);
+	disk_super = fs_info->__super_copy;
+
+	free_extent_buffer(fs_info->extref_root->node);
+	apfs_put_root(fs_info->extref_root);
+
+	bytenr = apfs_volume_super_extref_tree(disk_super) << fs_info->block_size_bits;
+	fs_info->extref_root = apfs_read_root(fs_info, APFS_OBJ_TYPE_EXTENT_LIST_TREE,
+					      bytenr);
+	if (IS_ERR(fs_info->extref_root)) {
+		apfs_err(fs_info, "failed to read extref tree root");
+		ret = PTR_ERR(fs_info->extref_root);
+		fs_info->extref_root = NULL;
+		goto fail_setup_omap_root;
+	}
+
 	return 0;
 
 fail_setup_omap_root:
@@ -3533,29 +3649,55 @@ struct apfs_super_block *apfs_read_dev_one_super(struct block_device *bdev,
 	return super;
 }
 
-struct apfs_vol_superblock *
-apfs_read_dev_volume_super(struct block_device *bdev, u64 bytenr)
+noinline struct apfs_vol_superblock *
+apfs_read_dev_volume_super(struct apfs_fs_info *fs_info, u64 bytenr, u64 size)
 
 {
 	struct apfs_vol_superblock *super;
-	struct page *page;
-	struct address_space *mapping = bdev->bd_inode->i_mapping;
+	struct apfs_vol_superblock *super_tmp;
+	struct block_device *bdev = fs_info->device->bdev;
+	struct apfs_buf *buf;
+	int ret;
 
-	if (bytenr + APFS_SUPER_INFO_SIZE >= i_size_read(bdev->bd_inode))
+	if (bytenr + size >= i_size_read(bdev->bd_inode))
 		return ERR_PTR(-EINVAL);
 
-	invalidate_bdev(bdev);
-	page = read_cache_page_gfp(mapping, bytenr >> PAGE_SHIFT, GFP_NOFS);
-	if (IS_ERR(page))
-		return ERR_CAST(page);
+	super = kzalloc(max_t(size_t, APFS_SUPER_INFO_SIZE, size), GFP_NOFS);
+	if (!super)
+		return ERR_PTR(-ENOMEM);
 
-	super = page_address(page);
-	if (apfs_volume_super_magic(super) != APFS_VOLUME_MAGIC) {
-		apfs_release_volume_super(super);
-		return ERR_PTR(-ENODATA);
+	buf = apfs_buf_alloc();
+	if (!buf) {
+		ret = -ENOMEM;
+		goto fail_super;
 	}
 
+	apfs_buf_init(fs_info, buf, ABF_READ, bytenr, size);
+	ret = apfs_buf_alloc_pages(buf, GFP_NOFS);
+	if (ret) {
+		ret = -ENOMEM;
+		goto fail_buf;
+	}
+
+	ret = apfs_buf_submit(buf, true);
+	if (ret)
+		goto fail_buf;
+
+	super_tmp = page_address(buf->pages[0]) + buf->offset;
+	if (apfs_volume_super_magic(super_tmp) != APFS_VOLUME_MAGIC) {
+		ret = -ENODATA;
+		goto fail_buf;
+	}
+
+	memcpy(super, super_tmp, min_t(size_t, buf->len, size));
+	apfs_buf_free(buf);
 	return super;
+
+fail_buf:
+	apfs_buf_free(buf);
+fail_super:
+	kfree(super);
+	return ERR_PTR(ret);
 }
 
 struct apfs_vol_superblock *
@@ -3565,21 +3707,15 @@ apfs_read_volume_super(struct apfs_nx_info *nx_info, int index)
 	struct apfs_root *omap_root = fs_info->omap_root;
 	u64 fs_oid = apfs_fs_oid(nx_info->super_copy, index);
 	u64 xid = apfs_nx_super_xid(nx_info->super_copy);
-	struct apfs_vol_superblock *sp = NULL;
 	u64 paddr;
 	int ret;
 
 	ret = apfs_find_omap_paddr(omap_root, fs_oid, xid, &paddr);
-	if (ret) {
-		sp = ERR_PTR(ret);
-		goto out;
-	}
+	if (ret)
+		return ERR_PTR(ret);
 
-	sp = apfs_read_dev_volume_super(nx_info->device->bdev, paddr);
-	if (IS_ERR(sp))
-		goto out;
-out:
-	return sp;
+	return apfs_read_dev_volume_super(nx_info->vol, paddr,
+					  APFS_SUPER_INFO_SIZE);
 }
 
 struct apfs_super_block *apfs_read_dev_super(struct block_device *bdev)
@@ -4130,7 +4266,8 @@ static void __cold __close_ctree(struct apfs_fs_info *fs_info)
 	 * we must make sure there is not any read request to
 	 * submit after we stopping all workers.
 	 */
-	invalidate_inode_pages2(fs_info->btree_inode->i_mapping);
+	if (fs_info->btree_inode)
+		invalidate_inode_pages2(fs_info->btree_inode->i_mapping);
 	apfs_stop_all_workers(fs_info);
 
 	clear_bit(APFS_FS_OPEN, &fs_info->flags);
@@ -4138,6 +4275,7 @@ static void __cold __close_ctree(struct apfs_fs_info *fs_info)
 	apfs_free_fs_roots(fs_info);
 
 	iput(fs_info->btree_inode);
+
 	apfs_mapping_tree_free(&fs_info->mapping_tree);
 
 	set_bit(APFS_FS_CLOSING_DONE, &fs_info->flags);
@@ -4815,7 +4953,6 @@ apfs_find_ephemeral_paddr(struct apfs_nx_info *info, u64 oid, u64 *paddr_res)
 	/* not found */
 	return -ENOENT;
 }
-
 
 u64 apfs_node_blockptr(const struct extent_buffer *eb, int nr)
 {

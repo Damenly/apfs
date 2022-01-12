@@ -81,6 +81,7 @@ struct apfs_root *apfs_get_fs_root_commit_root(struct apfs_fs_info *fs_info,
 						 struct apfs_path *path,
 						 u64 objectid);
 
+void apfs_destroy_fs_info(struct apfs_fs_info *fs_info);
 void apfs_free_fs_info(struct apfs_fs_info *fs_info);
 void apfs_free_nx_info(struct apfs_nx_info *nx_info);
 void apfs_get_nx_info(struct apfs_nx_info *nx_info);
@@ -164,7 +165,7 @@ int apfs_find_omap_paddr(struct apfs_root *root, u64 oid, u64 xid, u64 *paddr);
 u64 apfs_node_blockptr(const struct extent_buffer *eb, int nr);
 int apfs_read_checkpoint_map(struct apfs_device *device, u64 bytenr,
 			     struct apfs_checkpoint_map_phys *cmp);
-struct apfs_vol_superblock *apfs_read_dev_volume_super(struct block_device *bdev,
-						       u64 bytenr);
+struct apfs_vol_superblock *
+apfs_read_dev_volume_super(struct apfs_fs_info *fs_info, u64 bytenr, u64 size);
 int apfs_find_ephemeral_paddr(struct apfs_nx_info *info, u64 oid, u64 *paddr_res);
 #endif

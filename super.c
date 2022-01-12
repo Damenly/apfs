@@ -368,6 +368,7 @@ enum {
 	Opt_subvol,
 	Opt_subvol_empty,
 	Opt_subvolid,
+	Opt_xid,
 	Opt_thread_pool,
 	Opt_treelog, Opt_notreelog,
 	Opt_user_subvol_rm_allowed,
@@ -402,6 +403,7 @@ static const match_table_t tokens = {
 	{Opt_subvol, "subvol=%s"},
 	{Opt_subvol_empty, "subvol="},
 	{Opt_subvolid, "subvolid=%s"},
+	{Opt_xid, "xid=%s"},
 
 #ifdef CONFIG_APFS_DEBUG
 	{Opt_fragment_data, "fragment=data"},
@@ -1049,12 +1051,13 @@ out:
  * The value is later passed to mount_subvol()
  */
 static int apfs_parse_subvol_options(const char *options, char **subvol_name,
-		u64 *subvol_objectid)
+				     u64 *subvol_objectid, u64 *xid_res)
 {
 	substring_t args[MAX_OPT_ARGS];
 	char *opts, *orig, *p;
 	int error = 0;
 	u64 subvolid = (u64)-1;
+	u64 xid = (u64)-1;
 
 	if (!options)
 		return 0;
@@ -1081,6 +1084,13 @@ static int apfs_parse_subvol_options(const char *options, char **subvol_name,
 				goto out;
 
 			*subvol_objectid = subvolid;
+			break;
+		case Opt_xid:
+			error = match_u64(&args[0], &xid);
+			if (error)
+				goto out;
+
+			*xid_res = xid;
 			break;
 		default:
 			break;
@@ -1395,6 +1405,8 @@ static int apfs_test_super(struct super_block *s, void *data)
 		return false;
 	if (fs_info->index != p->index)
 		return false;
+	if (fs_info->xid != p->xid)
+		return false;
 
 	return true;
 }
@@ -1433,10 +1445,14 @@ apfs_mount(struct file_system_type *fs_type,
 	fmode_t mode = FMODE_READ | FMODE_EXCL;
 	int error = 0;
 	u64 subvol_objectid = -1;
+	u64 xid = 0;
 
-	error = apfs_parse_subvol_options(data, NULL, &subvol_objectid);
+	error = apfs_parse_subvol_options(data, NULL, &subvol_objectid, &xid);
 	if (error)
 		return ERR_PTR(error);
+
+	if (subvol_objectid >= APFS_MAX_FILE_SYSTEMS)
+		return ERR_PTR(-EINVAL);
 
 	if (!(flags & SB_RDONLY)) {
 		apfs_info(NULL, "mount with rw not supported now, mount with ro");
@@ -1464,6 +1480,7 @@ apfs_mount(struct file_system_type *fs_type,
 	}
 	apfs_init_fs_info(fs_info);
 	fs_info->index = subvol_objectid;
+	fs_info->xid = xid;
 
 	fs_info->super_copy = kzalloc(APFS_SUPER_INFO_SIZE, GFP_KERNEL);
 	fs_info->super_for_commit = kzalloc(APFS_SUPER_INFO_SIZE, GFP_KERNEL);
