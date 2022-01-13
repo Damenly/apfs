@@ -3360,6 +3360,18 @@ static int apfs_validate_volume_super(const struct apfs_vol_superblock *sb,
 	return ret;
 }
 
+static int
+apfs_check_volume_incompat_features(const struct apfs_vol_superblock *sb)
+{
+	u64 features = apfs_volume_super_incompat_features(sb);
+
+	if (features & APFS_INCOMPAT_SEALED_VOLUME) {
+		apfs_info(NULL, "sealed volume is not supported");
+		return -EOPNOTSUPP;
+	}
+	return 0;
+}
+
 static struct apfs_vol_superblock * __cold
 read_snapshot_super(struct apfs_fs_info *fs_info, u64 xid)
 {
@@ -3478,6 +3490,11 @@ open_fs_info:
 		goto fail_setup_nx_info;
 	}
 
+	ret = apfs_check_volume_incompat_features(disk_super);
+	if (ret) {
+		apfs_release_volume_super(disk_super);
+		goto fail_setup_nx_info;
+	}
 	fs_info = APFS_SB(sb);
 	fs_info->__super_copy = kzalloc(sizeof(struct apfs_vol_superblock),
 					GFP_KERNEL);

@@ -2204,6 +2204,7 @@ enum {
 	APFS_INTEGRITY_META_VERSION_HIGHEST = APFS_INTEGRITY_META_VERSION_2
 };
 
+/* used in apfs_integrity_meta_phys::flags */
 #define APFS_SEAL_BROKEN (1U << 0)
 
 enum apfs_hash_type {
@@ -2215,15 +2216,22 @@ enum apfs_hash_type {
 	APFS_HASH_MIN = APFS_HASH_SHA256,
 	APFS_HASH_MAX = APFS_HASH_SHA512,
 	APFS_HASH_DEFAULT = APFS_HASH_SHA256,
-
 };
+
+#define APFS_HASH_CCSHA256_SIZE 32
+#define APFS_HASH_CCSHA512_256_SIZE 32
+#define APFS_HASH_CCSHA384_SIZE 48
+#define APFS_HASH_CCSHA512_SIZE 64
+#define APFS_HASH_MAX_SIZE 64
 
 struct apfs_integrity_meta_phys {
 	__le64 o;
 	__le32 version;
 	__le32 flags;
 	enum apfs_hash_type hash_type;
+	/* hash offset */
 	__le32 root_hash_offset;
+	/* the xid broked the sealed volume */
 	__le64 broken_xid;
 	__le64 reserved[9];
 } __attribute__((__packed__));
@@ -2247,6 +2255,22 @@ struct apfs_file_info_key {
 	__le64 id_and_type;
 	__le64 info_and_lba;
 } __attribute__((__packed__));
+APFS_SETGET_FUNCS(file_info_info_and_lba, struct apfs_file_info_key, info_and_lba, 64);
+
+static inline u8
+apfs_file_info_type(const struct extent_buffer *eb,
+		    const struct apfs_file_info_key *file_info)
+{
+	return (apfs_file_info_info_and_lba(eb, file_info) &
+		APFS_FILE_INFO_TYPE_MASK) >> APFS_FILE_INFO_TYPE_SHIFT;
+}
+
+static inline u64
+apfs_file_info_lba(const struct extent_buffer *eb,
+		   const struct apfs_file_info_key *file_info)
+{
+	return apfs_file_info_info_and_lba(eb, file_info) & APFS_FILE_INFO_LBA_MASK;
+}
 
 enum apfs_file_info_type {
 	APFS_FILE_INFO_DATA_HASH = 1,
@@ -6830,4 +6854,9 @@ struct apfs_xattr_item *apfs_lookup_xattr_item(struct apfs_trans_handle *trans,
 					       struct apfs_root *root,
 					       struct apfs_path *path, u64 dir,
 					       const char *name, int mod);
+static inline bool apfs_volume_is_sealed(struct apfs_fs_info *fs_info)
+{
+	return apfs_volume_super_incompat_features(fs_info->__super_copy) &
+		APFS_INCOMPAT_SEALED_VOLUME;
+}
 #endif
