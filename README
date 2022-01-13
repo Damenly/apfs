@@ -35,8 +35,8 @@ Features implemented:
 4) Snapshot mount
 
 Features unimplemented:
-1) Sealed Volumes
-2) Volume group support
+1) Sealed Volumes (Not in to-do list, becase it breaks the basic node structure, useless in linux?)
+2) Volume group support (Not in to-do list, becase it breaks the apfs inode structure, useless in linux?)
 3) Encrytions
 
 Acknowledgments:
